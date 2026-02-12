@@ -149,6 +149,7 @@ fi
 
 # Auto-update .bashrc, .bash_aliases, and .bash_functions from GitHub
 GITHUB_BASE_URL="https://raw.githubusercontent.com/ait88/VPS/main"
+REPO_END='####END REPO CONFIG####'
 LOCAL_BASHRC="$HOME/.bashrc"
 LOCAL_BASH_ALIASES="$HOME/.bash_aliases"
 LOCAL_BASH_FUNCTIONS="$HOME/.bash_functions"
@@ -163,6 +164,34 @@ update_file() {
         # Only preserve the custom config for .bashrc
         if [ "$dest" = "$LOCAL_BASHRC" ] && \
            grep -q "$CUSTOM_START" "$dest" && grep -q "$CUSTOM_END" "$dest"; then
+
+            # ── STEP 0: Migrate lines appended after the end-of-repo marker ──
+            if grep -q "$REPO_END" "$dest"; then
+                local bottom_additions
+                bottom_additions=$(awk -v marker="$REPO_END" '
+                    BEGIN { found = 0 }
+                    found == 1 { print }
+                    $0 == marker { found = 1 }
+                ' "$dest")
+
+                if [ -n "$(printf '%s' "$bottom_additions" | tr -d '[:space:]')" ]; then
+                    echo "Migrating appended lines into custom config block..."
+                    printf '%s\n' "$bottom_additions" > /tmp/bottom_additions.txt
+                    # Insert additions just BEFORE ####END CUSTOM CONFIG####
+                    awk -v marker="$CUSTOM_END" '
+                        $0 == marker { system("cat /tmp/bottom_additions.txt") }
+                        { print }
+                    ' "$dest" > "${dest}.migrated"
+                    # Truncate at the REPO_END marker (discard migrated lines)
+                    awk -v marker="$REPO_END" '
+                        { print }
+                        $0 == marker { exit }
+                    ' "${dest}.migrated" > "${dest}.clean"
+                    mv "${dest}.clean" "$dest"
+                    rm -f "${dest}.migrated" /tmp/bottom_additions.txt
+                fi
+            fi
+
             # Extract custom config block from the existing file
             awk "/$CUSTOM_START/,/$CUSTOM_END/" "$dest" > /tmp/custom_config_block.txt
             # Remove custom config block from the new file (if present)
@@ -199,3 +228,4 @@ if command -v curl >/dev/null 2>&1; then
     [ -f "$LOCAL_BASH_ALIASES" ] && source "$LOCAL_BASH_ALIASES"
     [ -f "$LOCAL_BASH_FUNCTIONS" ] && source "$LOCAL_BASH_FUNCTIONS"
 fi
+####END REPO CONFIG####
